@@ -14,13 +14,13 @@ $ ./partdiff 1 2 100 1 2 100
 ```
 
 By passing the `FUTHARK_BACKEND` variable to `make`, you can customize how the futhark library is built.
-E.g. by running `make FUTHARK_BACKEND=opencl`, you can built `partdiff_futhark` with OpenCL.
+E.g. by running `make FUTHARK_BACKEND=opencl`, you can build `partdiff_futhark` with OpenCL.
 Some options are
 - `multicore`: thread-parallel execution, the default
-- `c`: sequential C
-- `cuda`: CUDA
-- `opencl`: OpenCL
-- `hip`: HIP
+- `c`: sequential execution
+- `cuda`: GPU via CUDA
+- `opencl`: GPU via OpenCL
+- `hip`: GPU via HIP
 - ...
 
 Run `futhark --help` to get an overview of the back-ends.
