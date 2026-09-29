@@ -1,0 +1,32 @@
+name: Correctness Check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build partdiff
+        run: make
+
+      - name: Run small correctness check subset with valgrind
+        uses: parcio/partdiff_tester@v0.1.10
+        with:
+          executable: "./partdiff"
+          strictness: "4"
+          valgrind: "true"
+          shuffle: "42"
+          max_num_tests: "5"
+
+      - name: Run full correctness check without valgrind
+        uses: parcio/partdiff_tester@v0.1.10
+        with:
+          executable: "./partdiff"
+          strictness: "4"
+          shuffle: "42"
