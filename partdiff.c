@@ -47,7 +47,6 @@
 struct calculation_arguments
 {
 	uint64_t               N;      /* number of spaces between lines (lines=N+1) */
-	double                 h;      /* length of a space between two lines */
 	double*                M;      /* host copy of the result matrix */
 	struct futhark_f64_2d* matrix; /* current matrix on the Futhark side */
 };
@@ -183,7 +182,6 @@ static void
 initVariables(struct calculation_arguments* arguments, struct calculation_results* results, struct options const* options)
 {
 	arguments->N = (options->interlines * 8) + 9 - 1;
-	arguments->h = 1.0 / arguments->N;
 
 	results->stat_iteration = 0;
 	results->stat_accuracy  = 0;
