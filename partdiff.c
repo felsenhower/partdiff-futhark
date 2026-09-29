@@ -61,7 +61,6 @@ struct futhark_state
 
 struct calculation_results
 {
-	uint64_t m;
 	uint64_t stat_iteration; /* number of current iteration */
 	double   stat_accuracy;  /* actual accuracy of all slaves in iteration */
 };
@@ -188,7 +187,6 @@ initVariables(struct calculation_arguments* arguments, struct calculation_result
 	arguments->num_matrices = (options->method == METH_JACOBI) ? 2 : 1;
 	arguments->h            = 1.0 / arguments->N;
 
-	results->m              = 0;
 	results->stat_iteration = 0;
 	results->stat_accuracy  = 0;
 }
@@ -250,7 +248,7 @@ allocateMemory(size_t size)
 }
 
 static void
-allocateMatrices(struct calculation_arguments* arguments)
+allocateResultMatrix(struct calculation_arguments* arguments)
 {
 	arguments->M = allocateMemory((arguments->N + 1) * (arguments->N + 1) * sizeof(double));
 }
@@ -258,9 +256,9 @@ allocateMatrices(struct calculation_arguments* arguments)
 static void
 initMatrices(struct futhark_state* state, struct calculation_arguments* arguments, struct options const* options)
 {
-	checkFuthark(state->ctx,
-	             futhark_entry_init_matrices(state->ctx, &arguments->matrix, (int64_t)options->interlines,
-	                                         (int64_t)options->pert_func));
+	int const ret = futhark_entry_init_matrices(state->ctx, &arguments->matrix, (int64_t)options->interlines,
+	                                            (int64_t)options->pert_func);
+	checkFuthark(state->ctx, ret);
 }
 
 static void
@@ -270,23 +268,29 @@ calculate(struct futhark_state* state, struct calculation_arguments* arguments, 
 	double const acc_iter = (options->termination == TERM_ITER) ? (double)options->term_iteration : options->term_accuracy;
 
 	struct futhark_opaque_tup3_arr2d_t_t_i64* calc_result;
-	checkFuthark(state->ctx,
-	             futhark_entry_calculate(state->ctx, &calc_result, (int64_t)options->method, (int64_t)options->pert_func,
-	                                     (int64_t)options->termination, acc_iter, arguments->matrix));
-	checkFuthark(state->ctx, futhark_context_sync(state->ctx));
+	int                                       ret = futhark_entry_calculate(state->ctx, &calc_result, (int64_t)options->method, (int64_t)options->pert_func,
+	                                                                        (int64_t)options->termination, acc_iter, arguments->matrix);
+	checkFuthark(state->ctx, ret);
+	ret = futhark_context_sync(state->ctx);
+	checkFuthark(state->ctx, ret);
 
 	struct futhark_f64_2d* result_matrix;
 	double                 residuum;
 	int64_t                iterations;
-	checkFuthark(state->ctx, futhark_project_opaque_tup3_arr2d_t_t_i64_0(state->ctx, &result_matrix, calc_result));
-	checkFuthark(state->ctx, futhark_project_opaque_tup3_arr2d_t_t_i64_1(state->ctx, &residuum, calc_result));
-	checkFuthark(state->ctx, futhark_project_opaque_tup3_arr2d_t_t_i64_2(state->ctx, &iterations, calc_result));
+	ret = futhark_project_opaque_tup3_arr2d_t_t_i64_0(state->ctx, &result_matrix, calc_result);
+	checkFuthark(state->ctx, ret);
+	ret = futhark_project_opaque_tup3_arr2d_t_t_i64_1(state->ctx, &residuum, calc_result);
+	checkFuthark(state->ctx, ret);
+	ret = futhark_project_opaque_tup3_arr2d_t_t_i64_2(state->ctx, &iterations, calc_result);
+	checkFuthark(state->ctx, ret);
 
 	results->stat_iteration = (uint64_t)iterations;
 	results->stat_accuracy  = residuum;
 
-	checkFuthark(state->ctx, futhark_values_f64_2d(state->ctx, result_matrix, arguments->M));
-	checkFuthark(state->ctx, futhark_context_sync(state->ctx));
+	ret = futhark_values_f64_2d(state->ctx, result_matrix, arguments->M);
+	checkFuthark(state->ctx, ret);
+	ret = futhark_context_sync(state->ctx);
+	checkFuthark(state->ctx, ret);
 
 	futhark_free_f64_2d(state->ctx, result_matrix);
 	futhark_free_opaque_tup3_arr2d_t_t_i64(state->ctx, calc_result);
@@ -385,7 +389,7 @@ main(int argc, char** argv)
 
 	initFuthark(&futhark);
 
-	allocateMatrices(&arguments);
+	allocateResultMatrix(&arguments);
 	initMatrices(&futhark, &arguments, &options);
 
 	gettimeofday(&start_time, NULL);

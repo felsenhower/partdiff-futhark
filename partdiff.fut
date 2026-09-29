@@ -17,28 +17,6 @@ let term_iter: i64 = 2
 
 let matrix_size (interlines: i64): i64 = interlines * 8 + 8
 
-let get_matrix (interlines: i64) (func: i64): [][]t =
-  let n = matrix_size interlines
-  let m = n + 1
-  let h = 1.0 / float_type.i64 n
-  in tabulate_2d m m
-       (\i j ->
-          if func != func_f0
-          then 0.0
-          else if i == 0 && j == 0
-          then 1.0
-          else if (i == n && j == 0) || (i == 0 && j == n)
-          then 0.0
-          else if j == 0
-          then 1.0 - h * float_type.i64 i
-          else if j == n
-          then h * float_type.i64 i
-          else if i == 0
-          then 1.0 - h * float_type.i64 j
-          else if i == n
-          then h * float_type.i64 j
-          else 0.0)
-
 let get_residuum [m] (old: [m][m]t) (new: [m][m]t): t =
   map2 (\row_old row_new -> map2 (\a b -> float_type.abs (a - b)) row_old row_new) old new
   |> flatten
@@ -83,7 +61,26 @@ let sweep [m] (h: t) (func: i64) (method: i64) (matrix: *[m][m]t): (*[m][m]t, t)
   else gauss_seidel_sweep h func matrix
 
 entry init_matrices (interlines: i64) (func: i64): [][]t =
-  get_matrix interlines func
+  let n = matrix_size interlines
+  let m = n + 1
+  let h = 1.0 / float_type.i64 n
+  in tabulate_2d m m
+       (\i j ->
+          if func != func_f0
+          then 0.0
+          else if i == 0 && j == 0
+          then 1.0
+          else if (i == n && j == 0) || (i == 0 && j == n)
+          then 0.0
+          else if j == 0
+          then 1.0 - h * float_type.i64 i
+          else if j == n
+          then h * float_type.i64 i
+          else if i == 0
+          then 1.0 - h * float_type.i64 j
+          else if i == n
+          then h * float_type.i64 j
+          else 0.0)
 
 entry calculate (method: i64) (func: i64) (term: i64) (acc_iter: t) (matrix0: *[][]t): ([][]t, t, i64) =
   assert (method == meth_gauss_seidel || method == meth_jacobi) (
