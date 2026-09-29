@@ -21,6 +21,8 @@ partdiff: partdiff.o partdiff_futhark.o
 
 partdiff.o: partdiff.c partdiff_futhark.h
 
+partdiff_futhark.o: CFLAGS += -Wno-pedantic
+
 partdiff_futhark.c partdiff_futhark.h &: partdiff.fut
 	futhark $(FUTHARK_BACKEND) --library -o partdiff_futhark partdiff.fut
 
