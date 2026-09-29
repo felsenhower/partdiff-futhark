@@ -46,10 +46,17 @@
 
 struct calculation_arguments
 {
-	uint64_t N;            /* number of spaces between lines (lines=N+1) */
-	uint64_t num_matrices; /* number of matrices */
-	double   h;            /* length of a space between two lines */
-	double*  M;            /* two matrices with real values */
+	uint64_t               N;            /* number of spaces between lines (lines=N+1) */
+	uint64_t               num_matrices; /* number of matrices */
+	double                 h;            /* length of a space between two lines */
+	double*                M;            /* host copy of the result matrix */
+	struct futhark_f64_2d* matrix;       /* current matrix on the Futhark side */
+};
+
+struct futhark_state
+{
+	struct futhark_context_config* cfg;
+	struct futhark_context*        ctx;
 };
 
 struct calculation_results
@@ -72,18 +79,6 @@ struct options
 
 struct timeval start_time; /* time when program started */
 struct timeval comp_time;  /* time when calculation completed */
-
-static void
-checkFuthark(struct futhark_context* ctx, int ret)
-{
-	if (ret != 0)
-	{
-		char* error = futhark_context_get_error(ctx);
-		fprintf(stderr, "Futhark error: %s\n", error != NULL ? error : "unknown error");
-		free(error);
-		exit(1);
-	}
-}
 
 static void
 usage(char* name)
@@ -199,6 +194,105 @@ initVariables(struct calculation_arguments* arguments, struct calculation_result
 }
 
 static void
+checkFuthark(struct futhark_context* ctx, int ret)
+{
+	if (ret != 0)
+	{
+		char* error = futhark_context_get_error(ctx);
+		fprintf(stderr, "Futhark error: %s\n", error != NULL ? error : "unknown error");
+		free(error);
+		exit(1);
+	}
+}
+
+static void
+initFuthark(struct futhark_state* state)
+{
+	state->cfg = futhark_context_config_new();
+	state->ctx = futhark_context_new(state->cfg);
+
+	char* error = futhark_context_get_error(state->ctx);
+
+	if (error != NULL)
+	{
+		fprintf(stderr, "Futhark error: %s\n", error);
+		free(error);
+		exit(1);
+	}
+}
+
+static void
+deinitFuthark(struct futhark_state* state)
+{
+	futhark_context_free(state->ctx);
+	futhark_context_config_free(state->cfg);
+}
+
+static void
+freeMatrices(struct futhark_state* state, struct calculation_arguments* arguments)
+{
+	free(arguments->M);
+	futhark_free_f64_2d(state->ctx, arguments->matrix);
+}
+
+static void*
+allocateMemory(size_t size)
+{
+	void* p;
+
+	if ((p = malloc(size)) == NULL)
+	{
+		printf("Memory error! (%" PRIu64 " Bytes requested)\n", size);
+		exit(1);
+	}
+
+	return p;
+}
+
+static void
+allocateMatrices(struct calculation_arguments* arguments)
+{
+	arguments->M = allocateMemory((arguments->N + 1) * (arguments->N + 1) * sizeof(double));
+}
+
+static void
+initMatrices(struct futhark_state* state, struct calculation_arguments* arguments, struct options const* options)
+{
+	checkFuthark(state->ctx,
+	             futhark_entry_init_matrices(state->ctx, &arguments->matrix, (int64_t)options->interlines,
+	                                         (int64_t)options->pert_func));
+}
+
+static void
+calculate(struct futhark_state* state, struct calculation_arguments* arguments, struct calculation_results* results,
+          struct options const* options)
+{
+	double const acc_iter = (options->termination == TERM_ITER) ? (double)options->term_iteration : options->term_accuracy;
+
+	struct futhark_opaque_tup3_arr2d_t_t_i64* calc_result;
+	checkFuthark(state->ctx,
+	             futhark_entry_calculate(state->ctx, &calc_result, (int64_t)options->method, (int64_t)options->pert_func,
+	                                     (int64_t)options->termination, acc_iter, arguments->matrix));
+	checkFuthark(state->ctx, futhark_context_sync(state->ctx));
+
+	struct futhark_f64_2d* result_matrix;
+	double                 residuum;
+	int64_t                iterations;
+	checkFuthark(state->ctx, futhark_project_opaque_tup3_arr2d_t_t_i64_0(state->ctx, &result_matrix, calc_result));
+	checkFuthark(state->ctx, futhark_project_opaque_tup3_arr2d_t_t_i64_1(state->ctx, &residuum, calc_result));
+	checkFuthark(state->ctx, futhark_project_opaque_tup3_arr2d_t_t_i64_2(state->ctx, &iterations, calc_result));
+
+	results->stat_iteration = (uint64_t)iterations;
+	results->stat_accuracy  = residuum;
+
+	checkFuthark(state->ctx, futhark_values_f64_2d(state->ctx, result_matrix, arguments->M));
+	checkFuthark(state->ctx, futhark_context_sync(state->ctx));
+
+	futhark_free_f64_2d(state->ctx, result_matrix);
+	futhark_free_opaque_tup3_arr2d_t_t_i64(state->ctx, calc_result);
+}
+
+static void
 displayStatistics(struct calculation_arguments const* arguments, struct calculation_results const* results, struct options const* options)
 {
 	int    N    = arguments->N;
@@ -256,7 +350,9 @@ displayMatrix(struct calculation_arguments* arguments, struct calculation_result
 	int const interlines = options->interlines;
 	int const N          = arguments->N;
 
-	typedef double (*matrix)[N + 1][N + 1];
+	(void)results;
+
+	typedef double (*matrix)[N + 1];
 
 	matrix Matrix = (matrix)arguments->M;
 
@@ -266,7 +362,7 @@ displayMatrix(struct calculation_arguments* arguments, struct calculation_result
 	{
 		for (x = 0; x < 9; x++)
 		{
-			printf("%7.4f", Matrix[results->m][y * (interlines + 1)][x * (interlines + 1)]);
+			printf("%7.4f", Matrix[y * (interlines + 1)][x * (interlines + 1)]);
 		}
 
 		printf("\n");
@@ -281,72 +377,26 @@ main(int argc, char** argv)
 	struct options               options;
 	struct calculation_arguments arguments;
 	struct calculation_results   results;
+	struct futhark_state         futhark;
 
 	askParams(&options, argc, argv);
 
 	initVariables(&arguments, &results, &options);
 
-	struct futhark_context_config* futhark_cfg = futhark_context_config_new();
-	struct futhark_context*        futhark_ctx = futhark_context_new(futhark_cfg);
+	initFuthark(&futhark);
 
-	char* futhark_init_error = futhark_context_get_error(futhark_ctx);
-
-	if (futhark_init_error != NULL)
-	{
-		fprintf(stderr, "Futhark error: %s\n", futhark_init_error);
-		free(futhark_init_error);
-		exit(1);
-	}
-
-	struct futhark_f64_2d* initial_matrix;
-	checkFuthark(futhark_ctx,
-	             futhark_entry_init_matrices(futhark_ctx, &initial_matrix, (int64_t)options.interlines, (int64_t)options.pert_func));
-
-	double const acc_iter = (options.termination == TERM_ITER) ? (double)options.term_iteration : options.term_accuracy;
+	allocateMatrices(&arguments);
+	initMatrices(&futhark, &arguments, &options);
 
 	gettimeofday(&start_time, NULL);
-
-	/* calculate, ported to Futhark */
-	struct futhark_opaque_tup3_arr2d_t_t_i64* calc_result;
-	checkFuthark(futhark_ctx,
-	             futhark_entry_calculate(futhark_ctx, &calc_result, (int64_t)options.method, (int64_t)options.pert_func,
-	                                     (int64_t)options.termination, acc_iter, initial_matrix));
-	checkFuthark(futhark_ctx, futhark_context_sync(futhark_ctx));
-
+	calculate(&futhark, &arguments, &results, &options);
 	gettimeofday(&comp_time, NULL);
-
-	struct futhark_f64_2d* result_matrix;
-	double                 residuum;
-	int64_t                iterations;
-	checkFuthark(futhark_ctx, futhark_project_opaque_tup3_arr2d_t_t_i64_0(futhark_ctx, &result_matrix, calc_result));
-	checkFuthark(futhark_ctx, futhark_project_opaque_tup3_arr2d_t_t_i64_1(futhark_ctx, &residuum, calc_result));
-	checkFuthark(futhark_ctx, futhark_project_opaque_tup3_arr2d_t_t_i64_2(futhark_ctx, &iterations, calc_result));
-
-	results.stat_iteration = (uint64_t)iterations;
-	results.stat_accuracy  = residuum;
-
-	arguments.M = malloc((arguments.N + 1) * (arguments.N + 1) * sizeof(double));
-
-	if (arguments.M == NULL)
-	{
-		printf("Memory error! (%" PRIu64 " Bytes requested)\n", (arguments.N + 1) * (arguments.N + 1) * sizeof(double));
-		exit(1);
-	}
-
-	checkFuthark(futhark_ctx, futhark_values_f64_2d(futhark_ctx, result_matrix, arguments.M));
-	checkFuthark(futhark_ctx, futhark_context_sync(futhark_ctx));
 
 	displayStatistics(&arguments, &results, &options);
 	displayMatrix(&arguments, &results, &options);
 
-	free(arguments.M);
-
-	futhark_free_f64_2d(futhark_ctx, result_matrix);
-	futhark_free_opaque_tup3_arr2d_t_t_i64(futhark_ctx, calc_result);
-	futhark_free_f64_2d(futhark_ctx, initial_matrix);
-
-	futhark_context_free(futhark_ctx);
-	futhark_context_config_free(futhark_cfg);
+	freeMatrices(&futhark, &arguments);
+	deinitFuthark(&futhark);
 
 	return 0;
 }
