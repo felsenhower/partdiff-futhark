@@ -347,7 +347,7 @@ main(int argc, char** argv)
 	struct futhark_opaque_tup3_arr2d_t_t_i64* calc_result;
 	checkFuthark(futhark_ctx,
 	             futhark_entry_calculate(futhark_ctx, &calc_result, (int64_t)options.method, (int64_t)options.pert_func,
-	                                      (int64_t)options.termination, acc_iter, initial_matrix));
+	                                     (int64_t)options.termination, acc_iter, initial_matrix));
 	checkFuthark(futhark_ctx, futhark_context_sync(futhark_ctx));
 
 	gettimeofday(&comp_time, NULL);
