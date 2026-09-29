@@ -44,23 +44,23 @@
 #define TERM_ACC          1
 #define TERM_ITER         2
 
-struct calculation_arguments
-{
-	uint64_t               N;      /* number of spaces between lines (lines=N+1) */
-	double*                M;      /* host copy of the result matrix */
-	struct futhark_f64_2d* matrix; /* current matrix on the Futhark side */
-};
-
 struct futhark_state
 {
 	struct futhark_context_config* cfg;
 	struct futhark_context*        ctx;
 };
 
+struct calculation_arguments
+{
+	uint64_t               N;      /* number of spaces between lines (lines=N+1) */
+	struct futhark_f64_2d* matrix; /* current matrix on the Futhark side */
+};
+
 struct calculation_results
 {
 	uint64_t stat_iteration; /* number of current iteration */
 	double   stat_accuracy;  /* actual accuracy of all slaves in iteration */
+	double*  result_matrix;  /* host copy of the result matrix */
 };
 
 struct options
@@ -223,9 +223,14 @@ deinitFuthark(struct futhark_state* state)
 }
 
 static void
+freeResultMatrix(struct calculation_results* results)
+{
+	free(results->result_matrix);
+}
+
+static void
 freeMatrices(struct futhark_state* state, struct calculation_arguments* arguments)
 {
-	free(arguments->M);
 	futhark_free_f64_2d(state->ctx, arguments->matrix);
 }
 
@@ -244,9 +249,9 @@ allocateMemory(size_t size)
 }
 
 static void
-allocateResultMatrix(struct calculation_arguments* arguments)
+allocateResultMatrix(struct calculation_results* results, struct calculation_arguments* arguments)
 {
-	arguments->M = allocateMemory((arguments->N + 1) * (arguments->N + 1) * sizeof(double));
+	results->result_matrix = allocateMemory((arguments->N + 1) * (arguments->N + 1) * sizeof(double));
 }
 
 static void
@@ -283,7 +288,7 @@ calculate(struct futhark_state* state, struct calculation_arguments* arguments, 
 	results->stat_iteration = (uint64_t)iterations;
 	results->stat_accuracy  = residuum;
 
-	ret = futhark_values_f64_2d(state->ctx, result_matrix, arguments->M);
+	ret = futhark_values_f64_2d(state->ctx, result_matrix, results->result_matrix);
 	checkFuthark(state->ctx, ret);
 	ret = futhark_context_sync(state->ctx);
 	checkFuthark(state->ctx, ret);
@@ -354,7 +359,7 @@ displayMatrix(struct calculation_arguments* arguments, struct calculation_result
 
 	typedef double (*matrix)[N + 1];
 
-	matrix Matrix = (matrix)arguments->M;
+	matrix Matrix = (matrix)results->result_matrix;
 
 	printf("Matrix:\n");
 
@@ -385,8 +390,8 @@ main(int argc, char** argv)
 
 	initFuthark(&futhark);
 
-	allocateResultMatrix(&arguments);
 	initMatrices(&futhark, &arguments, &options);
+	allocateResultMatrix(&results, &arguments);
 
 	gettimeofday(&start_time, NULL);
 	calculate(&futhark, &arguments, &results, &options);
@@ -395,6 +400,7 @@ main(int argc, char** argv)
 	displayStatistics(&results, &options);
 	displayMatrix(&arguments, &results, &options);
 
+	freeResultMatrix(&results);
 	freeMatrices(&futhark, &arguments);
 	deinitFuthark(&futhark);
 
