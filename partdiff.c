@@ -34,6 +34,8 @@
 #include <string.h>
 #include <sys/time.h>
 
+#include "partdiff_futhark.h"
+
 /* ************* */
 /* Some defines. */
 /* ************* */
@@ -85,6 +87,21 @@ struct options
 /* time measurement variables */
 struct timeval start_time; /* time when program started */
 struct timeval comp_time;  /* time when calculation completed */
+
+/* ************************************************************************ */
+/* checkFuthark: aborts with an error message if a Futhark call failed      */
+/* ************************************************************************ */
+static void
+checkFuthark(struct futhark_context* ctx, int ret)
+{
+	if (ret != 0)
+	{
+		char* error = futhark_context_get_error(ctx);
+		fprintf(stderr, "Futhark error: %s\n", error != NULL ? error : "unknown error");
+		free(error);
+		exit(1);
+	}
+}
 
 static void
 usage(char* name)
@@ -203,192 +220,6 @@ initVariables(struct calculation_arguments* arguments, struct calculation_result
 }
 
 /* ************************************************************************ */
-/* freeMatrices: frees memory for matrices                                  */
-/* ************************************************************************ */
-static void
-freeMatrices(struct calculation_arguments* arguments)
-{
-	free(arguments->M);
-}
-
-/* ************************************************************************ */
-/* allocateMemory ()                                                        */
-/* allocates memory and quits if there was a memory allocation problem      */
-/* ************************************************************************ */
-static void*
-allocateMemory(size_t size)
-{
-	void* p;
-
-	if ((p = malloc(size)) == NULL)
-	{
-		printf("Memory error! (%" PRIu64 " Bytes requested)\n", size);
-		exit(1);
-	}
-
-	return p;
-}
-
-/* ************************************************************************ */
-/* allocateMatrices: allocates memory for matrices                          */
-/* ************************************************************************ */
-static void
-allocateMatrices(struct calculation_arguments* arguments)
-{
-	uint64_t const N = arguments->N;
-
-	arguments->M = allocateMemory(arguments->num_matrices * (N + 1) * (N + 1) * sizeof(double));
-}
-
-/* ************************************************************************ */
-/* initMatrices: Initialize matrix/matrices and some global variables       */
-/* ************************************************************************ */
-static void
-initMatrices(struct calculation_arguments* arguments, struct options const* options)
-{
-	uint64_t g, i, j; /* local variables for loops */
-
-	uint64_t const N = arguments->N;
-	double const   h = arguments->h;
-
-	typedef double (*matrix)[N + 1][N + 1];
-
-	matrix Matrix = (matrix)arguments->M;
-
-	/* initialize matrix/matrices with zeros */
-	for (g = 0; g < arguments->num_matrices; g++)
-	{
-		for (i = 0; i <= N; i++)
-		{
-			for (j = 0; j <= N; j++)
-			{
-				Matrix[g][i][j] = 0.0;
-			}
-		}
-	}
-
-	/* initialize borders, depending on function (function 2: nothing to do) */
-	if (options->pert_func == FUNC_F0)
-	{
-		for (g = 0; g < arguments->num_matrices; g++)
-		{
-			for (i = 0; i <= N; i++)
-			{
-				Matrix[g][i][0] = 1.0 - (h * i);
-				Matrix[g][i][N] = h * i;
-				Matrix[g][0][i] = 1.0 - (h * i);
-				Matrix[g][N][i] = h * i;
-			}
-
-			Matrix[g][N][0] = 0.0;
-			Matrix[g][0][N] = 0.0;
-		}
-	}
-}
-
-/* ************************************************************************ */
-/* calculate: solves the equation                                           */
-/* ************************************************************************ */
-static void
-calculate(struct calculation_arguments const* arguments, struct calculation_results* results, struct options const* options)
-{
-	int    i, j;        /* local variables for loops */
-	int    m1, m2;      /* used as indices for old and new matrices */
-	double star;        /* four times center value minus 4 neigh.b values */
-	double residuum;    /* residuum of current iteration */
-	double maxresiduum; /* maximum residuum value of a slave in iteration */
-
-	int const    N = arguments->N;
-	double const h = arguments->h;
-
-	double pih    = 0.0;
-	double fpisin = 0.0;
-
-	int term_iteration = options->term_iteration;
-
-	typedef double (*matrix)[N + 1][N + 1];
-
-	matrix Matrix = (matrix)arguments->M;
-
-	/* initialize m1 and m2 depending on algorithm */
-	if (options->method == METH_JACOBI)
-	{
-		m1 = 0;
-		m2 = 1;
-	}
-	else
-	{
-		m1 = 0;
-		m2 = 0;
-	}
-
-	if (options->pert_func == FUNC_FPISIN)
-	{
-		pih    = M_PI * h;
-		fpisin = 0.25 * (2 * M_PI * M_PI) * h * h;
-	}
-
-	while (term_iteration > 0)
-	{
-		maxresiduum = 0;
-
-		/* over all rows */
-		for (i = 1; i < N; i++)
-		{
-			double fpisin_i = 0.0;
-
-			if (options->pert_func == FUNC_FPISIN)
-			{
-				fpisin_i = fpisin * sin(pih * (double)i);
-			}
-
-			/* over all columns */
-			for (j = 1; j < N; j++)
-			{
-				star = 0.25 * (Matrix[m2][i - 1][j] + Matrix[m2][i][j - 1] + Matrix[m2][i][j + 1] + Matrix[m2][i + 1][j]);
-
-				if (options->pert_func == FUNC_FPISIN)
-				{
-					star += fpisin_i * sin(pih * (double)j);
-				}
-
-				if (options->termination == TERM_ACC || term_iteration == 1)
-				{
-					residuum    = Matrix[m2][i][j] - star;
-					residuum    = fabs(residuum);
-					maxresiduum = (residuum < maxresiduum) ? maxresiduum : residuum;
-				}
-
-				Matrix[m1][i][j] = star;
-			}
-		}
-
-		results->stat_iteration++;
-		results->stat_accuracy = maxresiduum;
-
-		/* exchange m1 and m2 */
-		i  = m1;
-		m1 = m2;
-		m2 = i;
-
-		/* check for stopping calculation depending on termination method */
-		if (options->termination == TERM_ACC)
-		{
-			if (maxresiduum < options->term_accuracy)
-			{
-				term_iteration = 0;
-			}
-		}
-		else if (options->termination == TERM_ITER)
-		{
-			term_iteration--;
-		}
-	}
-
-	results->m = m2;
-}
-
-/* ************************************************************************ */
 /*  displayStatistics: displays some statistics about the calculation       */
 /* ************************************************************************ */
 static void
@@ -492,17 +323,67 @@ main(int argc, char** argv)
 
 	initVariables(&arguments, &results, &options);
 
-	allocateMatrices(&arguments);
-	initMatrices(&arguments, &options);
+	struct futhark_context_config* futhark_cfg = futhark_context_config_new();
+	struct futhark_context*        futhark_ctx = futhark_context_new(futhark_cfg);
+
+	char* futhark_init_error = futhark_context_get_error(futhark_ctx);
+
+	if (futhark_init_error != NULL)
+	{
+		fprintf(stderr, "Futhark error: %s\n", futhark_init_error);
+		free(futhark_init_error);
+		exit(1);
+	}
+
+	struct futhark_f64_2d* initial_matrix;
+	checkFuthark(futhark_ctx,
+	             futhark_entry_init_matrices(futhark_ctx, &initial_matrix, (int64_t)options.interlines, (int64_t)options.pert_func));
+
+	double const acc_iter = (options.termination == TERM_ITER) ? (double)options.term_iteration : options.term_accuracy;
 
 	gettimeofday(&start_time, NULL);
-	calculate(&arguments, &results, &options);
+
+	/* calculate, ported to Futhark */
+	struct futhark_opaque_tup3_arr2d_t_t_i64* calc_result;
+	checkFuthark(futhark_ctx,
+	             futhark_entry_calculate(futhark_ctx, &calc_result, (int64_t)options.method, (int64_t)options.pert_func,
+	                                      (int64_t)options.termination, acc_iter, initial_matrix));
+	checkFuthark(futhark_ctx, futhark_context_sync(futhark_ctx));
+
 	gettimeofday(&comp_time, NULL);
+
+	struct futhark_f64_2d* result_matrix;
+	double                 residuum;
+	int64_t                iterations;
+	checkFuthark(futhark_ctx, futhark_project_opaque_tup3_arr2d_t_t_i64_0(futhark_ctx, &result_matrix, calc_result));
+	checkFuthark(futhark_ctx, futhark_project_opaque_tup3_arr2d_t_t_i64_1(futhark_ctx, &residuum, calc_result));
+	checkFuthark(futhark_ctx, futhark_project_opaque_tup3_arr2d_t_t_i64_2(futhark_ctx, &iterations, calc_result));
+
+	results.stat_iteration = (uint64_t)iterations;
+	results.stat_accuracy  = residuum;
+
+	arguments.M = malloc((arguments.N + 1) * (arguments.N + 1) * sizeof(double));
+
+	if (arguments.M == NULL)
+	{
+		printf("Memory error! (%" PRIu64 " Bytes requested)\n", (arguments.N + 1) * (arguments.N + 1) * sizeof(double));
+		exit(1);
+	}
+
+	checkFuthark(futhark_ctx, futhark_values_f64_2d(futhark_ctx, result_matrix, arguments.M));
+	checkFuthark(futhark_ctx, futhark_context_sync(futhark_ctx));
 
 	displayStatistics(&arguments, &results, &options);
 	displayMatrix(&arguments, &results, &options);
 
-	freeMatrices(&arguments);
+	free(arguments.M);
+
+	futhark_free_f64_2d(futhark_ctx, result_matrix);
+	futhark_free_opaque_tup3_arr2d_t_t_i64(futhark_ctx, calc_result);
+	futhark_free_f64_2d(futhark_ctx, initial_matrix);
+
+	futhark_context_free(futhark_ctx);
+	futhark_context_config_free(futhark_cfg);
 
 	return 0;
 }
