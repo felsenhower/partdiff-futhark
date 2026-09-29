@@ -1,5 +1,7 @@
 /*
- * partdiff - PDE solver for Gauß-Seidel and Jacobi methods
+ * partdiff_futhark - a partdiff port to Futhark by Ruben Felgenhauer.
+ *
+ * Original partdiff:
  * Copyright (C) 1997 Thomas Ludwig
  * Copyright (C) 1997 Thomas A. Zochler
  * Copyright (C) 1997 Andreas C. Schmidt
@@ -20,29 +22,17 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* ************************************************************************ */
-/* Include standard header file.                                            */
-/* ************************************************************************ */
 #define _POSIX_C_SOURCE 200809L
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <inttypes.h>
-#include <math.h>
 #include <malloc.h>
 #include <string.h>
 #include <sys/time.h>
 
 #include "partdiff_futhark.h"
-
-/* ************* */
-/* Some defines. */
-/* ************* */
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 
 #define MAX_INTERLINES    100000
 #define MAX_ITERATION     200000
@@ -80,17 +70,9 @@ struct options
 	double   term_accuracy;  /* terminate if accuracy reached */
 };
 
-/* ************************************************************************ */
-/* Global variables                                                         */
-/* ************************************************************************ */
-
-/* time measurement variables */
 struct timeval start_time; /* time when program started */
 struct timeval comp_time;  /* time when calculation completed */
 
-/* ************************************************************************ */
-/* checkFuthark: aborts with an error message if a Futhark call failed      */
-/* ************************************************************************ */
 static void
 checkFuthark(struct futhark_context* ctx, int ret)
 {
@@ -204,9 +186,6 @@ askParams(struct options* options, int argc, char** argv)
 	}
 }
 
-/* ************************************************************************ */
-/* initVariables: Initializes some global variables                         */
-/* ************************************************************************ */
 static void
 initVariables(struct calculation_arguments* arguments, struct calculation_results* results, struct options const* options)
 {
@@ -219,9 +198,6 @@ initVariables(struct calculation_arguments* arguments, struct calculation_result
 	results->stat_accuracy  = 0;
 }
 
-/* ************************************************************************ */
-/*  displayStatistics: displays some statistics about the calculation       */
-/* ************************************************************************ */
 static void
 displayStatistics(struct calculation_arguments const* arguments, struct calculation_results const* results, struct options const* options)
 {
@@ -272,16 +248,6 @@ displayStatistics(struct calculation_arguments const* arguments, struct calculat
 	printf("\n");
 }
 
-/****************************************************************************/
-/** Explanation of the displayMatrix function:                             **/
-/**                                                                        **/
-/** The function displayMatrix outputs a Matrix                            **/
-/** in a humanly readable way.                                             **/
-/**                                                                        **/
-/** This is achieved by only printing parts of the matrix.                 **/
-/** From the matrix the first and last lines/columns and seven in between  **/
-/** rows/cols are printed out.                                             **/
-/****************************************************************************/
 static void
 displayMatrix(struct calculation_arguments* arguments, struct calculation_results* results, struct options* options)
 {
@@ -309,9 +275,6 @@ displayMatrix(struct calculation_arguments* arguments, struct calculation_result
 	fflush(stdout);
 }
 
-/* ************************************************************************ */
-/*  main                                                                    */
-/* ************************************************************************ */
 int
 main(int argc, char** argv)
 {
