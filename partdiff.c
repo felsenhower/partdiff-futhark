@@ -46,11 +46,10 @@
 
 struct calculation_arguments
 {
-	uint64_t               N;            /* number of spaces between lines (lines=N+1) */
-	uint64_t               num_matrices; /* number of matrices */
-	double                 h;            /* length of a space between two lines */
-	double*                M;            /* host copy of the result matrix */
-	struct futhark_f64_2d* matrix;       /* current matrix on the Futhark side */
+	uint64_t               N;      /* number of spaces between lines (lines=N+1) */
+	double                 h;      /* length of a space between two lines */
+	double*                M;      /* host copy of the result matrix */
+	struct futhark_f64_2d* matrix; /* current matrix on the Futhark side */
 };
 
 struct futhark_state
@@ -183,9 +182,8 @@ askParams(struct options* options, int argc, char** argv)
 static void
 initVariables(struct calculation_arguments* arguments, struct calculation_results* results, struct options const* options)
 {
-	arguments->N            = (options->interlines * 8) + 9 - 1;
-	arguments->num_matrices = (options->method == METH_JACOBI) ? 2 : 1;
-	arguments->h            = 1.0 / arguments->N;
+	arguments->N = (options->interlines * 8) + 9 - 1;
+	arguments->h = 1.0 / arguments->N;
 
 	results->stat_iteration = 0;
 	results->stat_accuracy  = 0;
@@ -297,13 +295,13 @@ calculate(struct futhark_state* state, struct calculation_arguments* arguments, 
 }
 
 static void
-displayStatistics(struct calculation_arguments const* arguments, struct calculation_results const* results, struct options const* options)
+displayStatistics(struct calculation_results const* results, struct options const* options)
 {
-	int    N    = arguments->N;
 	double time = (comp_time.tv_sec - start_time.tv_sec) + (comp_time.tv_usec - start_time.tv_usec) * 1e-6;
 
 	printf("Calculation time:       %f s\n", time);
-	printf("Memory usage:           %f MiB\n", (N + 1) * (N + 1) * sizeof(double) * arguments->num_matrices / 1024.0 / 1024.0);
+	// Note: We can't get the actual memory consumption from the Futhark library; print 0 instead.
+	printf("Memory usage:           %f MiB\n", 0.0);
 	printf("Calculation method:     ");
 
 	if (options->method == METH_GAUSS_SEIDEL)
@@ -396,7 +394,7 @@ main(int argc, char** argv)
 	calculate(&futhark, &arguments, &results, &options);
 	gettimeofday(&comp_time, NULL);
 
-	displayStatistics(&arguments, &results, &options);
+	displayStatistics(&results, &options);
 	displayMatrix(&arguments, &results, &options);
 
 	freeMatrices(&futhark, &arguments);
